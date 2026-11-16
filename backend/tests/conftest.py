@@ -14,7 +14,7 @@ def sessions():
     if not url:
         pytest.skip("Requires a dedicated TEST_DATABASE_URL PostgreSQL database")
     admin = create_engine(url)
-    schema = "wayfaro_sync_test_" + uuid.uuid4().hex
+    schema = "wayfaro_cv_test_" + uuid.uuid4().hex
     with admin.begin() as db:
         db.execute(text(f'CREATE SCHEMA "{schema}"'))
     engine = create_engine(url, connect_args={"options": f"-csearch_path={schema}"})

@@ -4,7 +4,6 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
     database_url: str = "postgresql+psycopg://jobmatcher:jobmatcher@localhost:5432/jobmatcher"
-    ingestion_admin_token: SecretStr | None = None
     gemini_api_key: SecretStr | None = None
     gemini_model: str = ""
     cv_match_retention_hours: int = Field(24, ge=1, le=168)

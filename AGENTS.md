@@ -1,85 +1,68 @@
 # Repository Guidelines
 
-## Project Structure & Module Organization
+## Product scope
 
-This Phase 1 application uses React, TypeScript, FastAPI, and PostgreSQL.
-- `backend/app/`: API routes in `api/`, SQLAlchemy models in `models/`, database setup in `db/`, and the database-backed worker in `workers/`.
-- `backend/alembic/`: schema migrations; add revisions under `versions/`.
-- `backend/tests/`: pytest tests for health and input validation.
-- `frontend/src/`: React entry point (`main.tsx`) and styles (`style.css`). No dedicated asset directory exists yet.
-- `docker-compose.yml`: database, migration, API, worker, and frontend services.
-- `.github/workflows/`: backend checks and frontend build automation.
+Wayfaro is a private text CV/JD comparison service. React, TypeScript and Vite form
+the English UI; FastAPI, SQLAlchemy, PostgreSQL and a database worker form the backend.
+No public job catalog, ATS connectors, manual job ingestion, ranking, PDF parsing,
+login or permanent CV storage. Do not restore removed product features implicitly.
 
-## Build, Test, and Development Commands
+## Structure and responsibilities
 
-Run from the repository root unless indicated:
-- `docker compose up --build`: build and start the full stack, applying migrations before API and worker startup. Frontend: `http://localhost:5173`; API docs: `http://localhost:8000/docs`.
-- In `backend/`, `pip install -r requirements.txt`: install backend and test dependencies; CI uses Python 3.12.
-- In `backend/`, `PYTHONPATH=. pytest -q tests`: run backend tests.
-- In `backend/`, `ruff check app tests --select E4,E7,E9,F`: run the lint checks enforced by CI.
-- In `frontend/`, `npm install` then `npm run dev`: start Vite; CI uses Node.js 22.
-- In `frontend/`, `npm run build`: run TypeScript checks and create the production bundle; `npm run typecheck` checks types alone.
+- `backend/app/api/`: policy, analysis creation/status/deletion, owned tasks, health.
+- `backend/app/models/core.py`: BackgroundJob, AnalysisSession, CVMatchAnalysis only.
+- `backend/app/services/matching/`: Gemini adapter, comparison pipeline, schemas,
+  evidence verification, temporary storage, privacy, cleanup and analysis worker.
+- `backend/app/workers/runner.py`: PostgreSQL claim, lease, heartbeat and retry.
+- `backend/alembic/versions/0001_cv_comparison.py`: sole initial revision `cv_initial`.
+- `backend/tests/`: deterministic unit tests, isolated PostgreSQL integration tests,
+  migration contracts and separately opted-in live Gemini smoke test.
+- `frontend/src/`: analysis-only React UX. `frontend/tests/`: Node test runner.
 
-## Coding Style & Naming Conventions
+## Development workflow
 
-Use four-space indentation and snake_case for Python functions and modules; use PascalCase for classes. Match the frontend’s two-space indentation, single quotes, and semicolons. Use PascalCase for React components and camelCase for variables and handlers. TypeScript strict mode is enabled. Ruff is available; no automatic formatter is configured.
+Inspect before changing; propose a plan and wait for approval unless already authorized.
+Preserve existing uncommitted work. Implement one milestone at a time. Avoid new
+infrastructure, abstractions and dependencies unless needed. Report changed files,
+actual test results/skips and limitations. Never claim an unexecuted test passed.
 
-## Testing Guidelines
+## Database safety
 
-Use pytest and FastAPI’s `TestClient`; name files `test_*.py` and functions `test_*`. Cover changed API behavior, validation, and worker transitions where applicable. Database integration tests require PostgreSQL. No coverage threshold or frontend test framework is configured. Run backend tests, lint, and the frontend build before requesting review.
+The previous migration history was replaced by `cv_initial`, which is incompatible
+with old databases. Do not upgrade or stamp an old schema. Development DB deletion
+or recreation requires separate explicit approval identifying the instance, DB and
+scope. Do not modify other databases or Docker volumes. Tests require an independent
+PostgreSQL 16 database via TEST_DATABASE_URL and unique disposable schemas. No reset
+against development. Future schema changes should add revisions, not rewrite this
+initial revision without authorization.
 
-## Commit & Pull Request Guidelines
+## Privacy and analysis invariants
 
-This checkout has no Git metadata, so existing commit conventions cannot be verified. Use concise, imperative commit subjects. Pull requests should describe the change, link relevant issues, report validation commands and results, and include screenshots for UI changes. Explain migration or configuration changes explicitly.
+Keep cv_compare and common PostgreSQL queue fencing/heartbeat/backoff intact.
+Never put CV/JD text in URLs, logs or queue payloads. Frontend documents, results and
+analysis handles stay in memory: no localStorage, sessionStorage or analytics.
+Never automatically resend an ambiguous POST. Preserve anonymous ownership, cookies,
+CSRF, origin checks, consent, expiry, physical deletion and sanitized error handling.
+No actual Gemini calls without explicit approval. Secrets/model come from server
+GEMINI_API_KEY/GEMINI_MODEL; never expose secrets to VITE_* or logs.
 
-## Configuration & Current Scope
+Use exact supporting quotes with Unicode code-point offsets. Repair incorrect offsets
+only for a unique exact quote; accept repeated quotes only at correct original offsets.
+Preserve local Pydantic limits even when transmission schema omits maxItems.
+Use MATCHED/UNVERIFIED; UNVERIFIED does not mean missing skill. No unconfirmed gaps,
+aggregate score, fabricated experience or eligibility assessment. Work eligibility
+stays NOT_ASSESSED. Keep existing analysis API contracts.
 
-Configure `DATABASE_URL` for the backend and `VITE_API_URL` for the frontend. Keep secrets out of source control; bundled database credentials are development-only. Extraction tasks currently fail with `NOT_IMPLEMENTED`; preserve that explicit behavior until extraction is implemented. Keep this unauthenticated development setup private.
+## Commands and style
 
-## Product Context & Architecture Principles
-
-This project is **Wayfaro** (`wayfaro`).
-
-Tagline: Discover opportunities beyond borders.
-
-Description: AI-powered Global Job Discovery & Work Eligibility Intelligence.
-
-Wayfaro serves international job seekers; opportunity verification remains the primary differentiator.
-
-The primary UX is CV Analysis-first: compare pasted CV and JD text with exact supporting evidence before optional CV saving. Discovery remains a secondary flow for analyzing other jobs. Career Fit and Work Eligibility are separate; the current phase does not assess visas or work eligibility.
-
-Career transition analysis is an optional feature, not a requirement for every user.
-
-### Core Principles
-
-- Keep job discovery, extraction, eligibility verification, and ranking as separate responsibilities.
-- Use provider-independent ATS connectors. Start with Greenhouse and allow additional providers later.
-- Preserve original job descriptions, source identifiers, and source URLs.
-- Never infer visa sponsorship, work authorization, or remote-work eligibility from missing information.
-- Distinguish `ELIGIBLE`, `UNKNOWN`, and `INELIGIBLE`. Missing evidence must not automatically produce `INELIGIBLE`.
-- Keep eligibility decisions separate from career-fit ranking scores.
-- Preserve supporting evidence and explicitly identify missing or conflicting information.
-- Do not apply automatic country-based ranking bonuses or penalties.
-- Keep career transition analysis optional and configurable per user.
-- Preserve profile and analysis version history when implementing AI analysis.
-
-### Development Workflow
-
-- Inspect the existing repository before proposing changes.
-- Present an implementation plan and wait for approval before modifying files.
-- Reuse existing models, migrations, routes, and worker infrastructure where possible.
-- Implement one milestone at a time.
-- Add tests for new behavior and relevant failure cases.
-- Do not introduce Redis, Celery, or unnecessary infrastructure.
-- Never claim tests passed unless they were actually executed.
-- Report changed files, test results, and remaining limitations after implementation.
-
-### Current Milestone
-
-CV Analysis-first Phase 1: backend-only text CV/JD matching through Gemini, anonymous ownership,
-exact source evidence, MATCHED/UNVERIFIED, expiring private data and PostgreSQL worker integration.
-Keep Greenhouse, Discovery and manual ingestion. Do not publish private analysis JDs as JobListing.
-No total score, confirmed CV_GAP/SKILL_GAP, eligibility analysis, CV permanent storage/versioning,
-React redesign, recommendation or PDF parsing in this phase. Work Eligibility stays NOT_ASSESSED.
-Never put CV/JD text in URLs, logs or background job payloads. Existing job_extract/job_analyze
-remain NOT_IMPLEMENTED; use the separate cv_compare task. Do not modify prior migration revisions.
+Use a project-local Python 3.12 environment, never system-wide dependency changes.
+From `backend/`: `PYTHONPATH=. ../.venv/bin/pytest -q tests` and
+`../.venv/bin/ruff check app tests --select E4,E7,E9,F`.
+Set RUN_GEMINI_SMOKE=0 for ordinary verification. PostgreSQL tests skip without a
+dedicated TEST_DATABASE_URL. Run them before claiming database verification.
+From `frontend/` with Node 22: `npm ci`, `npm test`, `npm run typecheck`, `npm run build`.
+Use pytest/TestClient for backend and existing Node/React tests for frontend.
+Python: four spaces, snake_case functions, PascalCase classes. Frontend: two spaces,
+single quotes, semicolons, PascalCase components, camelCase functions, strict TS.
+Git is available. Use concise imperative commit subjects and report validation and
+migration/configuration implications in reviews.

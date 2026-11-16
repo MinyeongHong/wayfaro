@@ -11,10 +11,6 @@ const React = require('react');
 const { renderToStaticMarkup: render } = require('react-dom/server');
 const { AnalysisPage } = require('./AnalysisPage.js');
 const { AnalysisResults } = require('./components/analysis/AnalysisResults.js');
-const { DiscoveryPage } = require('./DiscoveryPage.js');
-const { JobList, Pagination } = require('./components/JobList.js');
-const { JobDetail } = require('./components/JobDetail.js');
-const { ManualJobForm } = require('./components/ManualJobForm.js');
 const CV = '🚀 Built Python services for a small team.\r\nCafé reporting project.';
 const JD = 'Required: Python services. Preferred: SQL. Work authorization required.';
 const aid = '00000000-0000-0000-0000-000000000001';
@@ -164,21 +160,11 @@ test('result rendering preserves exact quotes, English chrome and UNVERIFIED unc
   assert(markup.includes('It does not mean you lack the skill')); assert(markup.includes('Work eligibility: not assessed'));
   assert(!/match score|\d+%/i.test(markup)); assert(markup.includes('Do you have experience with SQL?'));
 });
-test('untrusted evidence is escaped as text and unsafe job links are not rendered', () => {
+test('untrusted evidence is escaped as text', () => {
   const cv = '<script>alert(1)</script> '.repeat(2); const data = result();
   data.assessments[0].cv_evidence = [span(cv, '<script>alert(1)</script>')];
   const markup = render(React.createElement(AnalysisResults, { result: data, snapshot: { cv, jd: JD } }));
   assert(markup.includes('&lt;script&gt;')); assert(!markup.includes('<script>'));
-});
-test('discovery keeps search controls, list, detail, paging and public manual form in English', t => {
-  const previous = globalThis.window; globalThis.window = { location: { search: '?view=discover&q=Engineer' } }; t.after(() => { globalThis.window = previous; });
-  const markup = render(React.createElement(DiscoveryPage)); assert(markup.includes('value="Engineer"')); assert(markup.includes('Apply search')); assert(markup.includes('Add a job manually'));
-  const job = { id: aid, title: 'Engineer', origin: 'manual', remote_mention: 'UNKNOWN', raw_text: 'Original job description', source_url: 'javascript:alert(1)' };
-  assert(render(React.createElement(JobList, { data: { items: [job] }, selected: aid, onSelect() {} })).includes('Engineer'));
-  assert(render(React.createElement(JobDetail, { job, onClose() {} })).includes('Original job description'));
-  assert(!render(React.createElement(JobDetail, { job, onClose() {} })).includes('href="javascript:'));
-  assert(render(React.createElement(Pagination, { data: { page: 1, total_pages: 2 }, onPage() {} })).includes('Page 1 of 2'));
-  assert(render(React.createElement(ManualJobForm, { onCreated() {} })).includes('Do not paste your CV'));
 });
 test('analysis source does not use browser storage, console, analytics, or URL state', () => {
   for (const name of ['analysisController.js', 'analysisApi.js', 'AnalysisPage.js', 'components/analysis/AnalysisResults.js']) {
@@ -246,14 +232,10 @@ test('status checking may be resumed after a failed deletion without creating a 
   assert.equal(h.calls.read.length, previous + 1); assert.equal(h.calls.create.length, 1); h.controller.pause();
 });
 
-test('the application defaults to analysis but preserves legacy discovery links', t => {
+test('the application renders private comparison without public job navigation', () => {
   const { App } = require('./App.js');
-  const previous = globalThis.window;
-  globalThis.window = { location: { search: '' } };
-  t.after(() => { globalThis.window = previous; });
-  assert(render(React.createElement(App)).includes('meets the opportunity'));
-  globalThis.window.location.search = '?page_size=2';
-  assert(render(React.createElement(App)).includes('Explore your next opportunity'));
-  globalThis.window.location.search = `?job=${aid}`;
-  assert(render(React.createElement(App)).includes('Explore your next opportunity'));
+  const markup = render(React.createElement(App));
+  assert(markup.includes('meets the opportunity'));
+  assert(!markup.includes('Job discovery'));
+  assert(!markup.includes('Add a job manually'));
 });

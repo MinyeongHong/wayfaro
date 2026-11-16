@@ -7,10 +7,10 @@ import pytest
 from fastapi.testclient import TestClient
 from pydantic import SecretStr
 from sqlalchemy import func, select
-from app.api.routes import get_db
+from app.api.dependencies import get_db
 from app.config import settings
 from app.main import app
-from app.models.core import AnalysisSession, BackgroundJob, CVMatchAnalysis, JobListing
+from app.models.core import AnalysisSession, BackgroundJob, CVMatchAnalysis
 from app.services.matching.llm import MatchError
 from app.services.matching.storage import cleanup_expired, now
 from app.workers import runner
@@ -58,7 +58,7 @@ def test_private_end_to_end(private_client, sessions):
     with sessions() as db:
         task = db.get(BackgroundJob, uuid.UUID(created["task_id"]))
         assert task.payload == {"analysis_id": created["analysis_id"]}
-        assert db.scalar(select(func.count()).select_from(JobListing)) == 0
+        assert set(CVMatchAnalysis.metadata.tables) == {"background_jobs", "analysis_sessions", "cv_match_analyses"}
     process(sessions)
     body = private_client.get(created["status_url"]).json()
     assert body["status"] == "completed" and body["result"]["score"] is None
@@ -280,3 +280,28 @@ def test_http_diagnostics_reach_private_result_and_safe_worker_log(private_clien
     assert "http_status=400" in caplog.text and "stage=comparison" in caplog.text
     for private in (CV, JD, "mock-key", "PRIVATE_PROVIDER_BODY"):
         assert private not in caplog.text and private not in response.text
+
+
+def test_lease_expiring_during_result_flush_rolls_back(private_client, sessions):
+    from sqlalchemy import event
+    created = create(private_client)
+    task_id = uuid.UUID(created['task_id'])
+    analysis_id = uuid.UUID(created['analysis_id'])
+    fired = []
+    def expire_after_result_flush(db, context):
+        if fired:
+            return
+        analyses = [obj for obj in db.identity_map.values()
+                    if isinstance(obj, CVMatchAnalysis) and obj.result is not None]
+        if analyses:
+            fired.append(True)
+            db.get(BackgroundJob, task_id).lease_expires_at = now(db) - timedelta(seconds=1)
+    event.listen(sessions.class_, 'after_flush_postexec', expire_after_result_flush)
+    try:
+        process(sessions)
+    finally:
+        event.remove(sessions.class_, 'after_flush_postexec', expire_after_result_flush)
+    assert fired
+    with sessions() as db:
+        assert db.get(CVMatchAnalysis, analysis_id).result is None
+        assert db.get(BackgroundJob, task_id).status == 'processing'

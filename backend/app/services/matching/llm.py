@@ -2,12 +2,25 @@
 import copy
 import json
 import re
+from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 
 import httpx
 from pydantic import ValidationError
 
 from app.config import settings
-from app.services.ingestion.greenhouse import _retry_after
+
+
+def _retry_after(value):
+    if not value:
+        return None
+    try:
+        return max(0.0, float(value))
+    except ValueError:
+        try:
+            return max(0.0, (parsedate_to_datetime(value) - datetime.now(timezone.utc)).total_seconds())
+        except (ValueError, TypeError, OverflowError):
+            return None
 
 
 def _gemini_schema(schema):

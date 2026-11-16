@@ -1,1 +1,1 @@
-"""Private CV Match Engine: independent of public discovery and work eligibility."""
+"""Private CV Match Engine: evidence-based private comparison."""

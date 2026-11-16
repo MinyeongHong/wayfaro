@@ -8,6 +8,7 @@ def test_health():
     assert response.json() == {"status": "ok"}
 
 
-def test_invalid_job_input():
-    response = TestClient(app).post("/api/v1/jobs", json={"raw_text": "short"})
-    assert response.status_code == 422
+def test_only_private_api_routes_are_exposed():
+    paths = set(TestClient(app).get('/openapi.json').json()['paths'])
+    assert paths == {'/api/v1/health', '/api/v1/tasks/{task_id}',
+                     '/api/v1/analyses/policy', '/api/v1/analyses', '/api/v1/analyses/{analysis_id}'}

@@ -1,58 +1,58 @@
-"""Offline PostgreSQL DDL equivalence; complements live migration tests."""
+"""Offline contract for the single private-comparison initial revision."""
 import importlib.util
 from pathlib import Path
 import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.schema import CreateTable
+from app.db.base import Base
+from app.models import core  # noqa: F401
 
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def load(path):
-    spec = importlib.util.spec_from_file_location("schema_contract", path)
+def load_migration():
+    path = ROOT / 'alembic' / 'versions' / '0001_cv_comparison.py'
+    spec = importlib.util.spec_from_file_location('initial_schema', path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
 
 
-def test_0001_postgresql_ddl_exactly_matches_original_models(monkeypatch):
-    original = load(Path(__file__).parent / "fixtures" / "original_models.py").Base.metadata
-    migration = load(ROOT / "alembic" / "versions" / "0001_initial.py")
+def test_initial_migration_matches_private_models(monkeypatch):
+    migration = load_migration()
+    assert migration.down_revision is None
+    assert migration.revision == 'cv_initial'
+    assert len(list((ROOT / 'alembic' / 'versions').glob('*.py'))) == 1
     frozen = sa.MetaData()
-
-    def create_table(name, *columns, **kwargs):
-        return sa.Table(name, frozen, *columns, **kwargs)
-
-    monkeypatch.setattr(migration.op, "create_table", create_table)
-    migration.upgrade()
-    assert set(original.tables) == set(frozen.tables)
-    dialect = postgresql.dialect()
-    for name in original.tables:
-        expected, actual = original.tables[name], frozen.tables[name]
-        assert list(expected.columns.keys()) == list(actual.columns.keys()), name
-        # Constraint iteration order is immaterial; every DDL clause must match.
-        def clauses(table):
-            return sorted(line.strip().rstrip(",") for line in str(CreateTable(table).compile(dialect=dialect)).splitlines() if line.strip())
-        assert clauses(actual) == clauses(expected), name
-
-
-def test_0003_matches_private_models_without_changing_old_tables(monkeypatch):
-    from app.models.core import AnalysisSession, CVMatchAnalysis
-    from app.db.base import Base
-    migration = load(ROOT / "alembic" / "versions" / "0003_cv_match.py")
-    frozen = sa.MetaData()
-    # Resolve the unchanged background task foreign key for DDL compilation.
-    Base.metadata.tables["background_jobs"].to_metadata(frozen)
     indexes = []
-    monkeypatch.setattr(migration.op, "create_table", lambda name, *columns, **kwargs: sa.Table(name, frozen, *columns, **kwargs))
-    monkeypatch.setattr(migration.op, "create_index", lambda name, table, columns: indexes.append((name, table, columns)))
+    monkeypatch.setattr(migration.op, 'create_table', lambda name, *columns, **kwargs: sa.Table(name, frozen, *columns, **kwargs))
+    monkeypatch.setattr(migration.op, 'create_index', lambda name, table, columns: indexes.append((name, table, tuple(columns))))
     migration.upgrade()
-    assert set(frozen.tables) == {"background_jobs", "analysis_sessions", "cv_match_analyses"}
+    assert set(frozen.tables) == set(Base.metadata.tables) == {
+        'background_jobs', 'analysis_sessions', 'cv_match_analyses'}
     dialect = postgresql.dialect()
-    for model in (AnalysisSession, CVMatchAnalysis):
-        expected, actual = model.__table__, frozen.tables[model.__tablename__]
-        def clauses(table):
-            return sorted(line.strip().rstrip(",") for line in str(CreateTable(table).compile(dialect=dialect)).splitlines() if line.strip())
-        assert clauses(actual) == clauses(expected)
-        assert {(index.name, model.__tablename__, tuple(column.name for column in index.columns)) for index in expected.indexes} == {
-            (name, table, tuple(columns)) for name, table, columns in indexes if table == model.__tablename__}
+    def clauses(table):
+        return sorted(line.strip().rstrip(',') for line in str(CreateTable(table).compile(dialect=dialect)).splitlines() if line.strip())
+    for name, expected in Base.metadata.tables.items():
+        assert clauses(frozen.tables[name]) == clauses(expected), name
+        assert {(i.name, name, tuple(c.name for c in i.columns)) for i in expected.indexes} == {
+            i for i in indexes if i[1] == name}
+
+
+def test_alembic_environment_generates_initial_sql_without_database(monkeypatch):
+    from io import StringIO
+    from alembic import command
+    from alembic.config import Config
+    from app.config import settings
+    # Encoded query values exercise ConfigParser URL interpolation too.
+    monkeypatch.setattr(settings, 'database_url',
+        'postgresql+psycopg://offline:offline@127.0.0.1/offline?options=-csearch_path%3Dtest')
+    output = StringIO()
+    config = Config(str(ROOT / 'alembic.ini'), output_buffer=output)
+    config.set_main_option('script_location', str(ROOT / 'alembic'))
+    command.upgrade(config, 'head', sql=True)
+    sql = output.getvalue()
+    assert "'cv_initial'" in sql
+    for name in Base.metadata.tables:
+        assert f'CREATE TABLE {name}' in sql
+    assert sql.count('CREATE TABLE ') == 4  # Three models plus Alembic version table.

@@ -254,7 +254,7 @@ def test_malformed_json_and_unknown_fields_do_not_echo_private_values():
 
 
 def test_private_internal_error_is_sanitized(configured, monkeypatch, caplog):
-    from app.api.routes import get_db
+    from app.api.dependencies import get_db
     import app.api.analysis as api
     def no_db():
         yield None

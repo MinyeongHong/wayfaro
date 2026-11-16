@@ -5,6 +5,20 @@ on:
 jobs:
   backend:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: wayfaro_test
+          POSTGRES_PASSWORD: test-only
+          POSTGRES_DB: wayfaro_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U wayfaro_test -d wayfaro_test"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      TEST_DATABASE_URL: postgresql+psycopg://wayfaro_test:test-only@localhost:5432/wayfaro_test
+      RUN_GEMINI_SMOKE: '0'
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -22,7 +36,11 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - run: npm install
+      - run: npm ci
+        working-directory: frontend
+      - run: npm test
+        working-directory: frontend
+      - run: npm run typecheck
         working-directory: frontend
       - run: npm run build
         working-directory: frontend

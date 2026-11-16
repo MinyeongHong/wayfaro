@@ -3,7 +3,7 @@ from datetime import datetime, timedelta, timezone
 from email.utils import format_datetime
 
 import pytest
-from app.services.ingestion.greenhouse import _retry_after
+from app.services.matching.llm import _retry_after
 from app.workers.runner import retry_delay
 
 

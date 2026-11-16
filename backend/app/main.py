@@ -6,7 +6,7 @@ from app.api.analysis import router as analysis_router
 from fastapi.exceptions import RequestValidationError
 from app.services.matching.privacy import PrivateAnalysisMiddleware, private_validation_error
 
-app = FastAPI(title="Wayfaro", description="AI-powered Global Job Discovery & Work Eligibility Intelligence", version="0.1.0")
+app = FastAPI(title="Wayfaro", description="Private, evidence-based CV and job description comparison", version="0.1.0")
 app.add_middleware(CORSMiddleware, allow_origins=settings.cv_match_allowed_origins,
                    allow_credentials=True, allow_methods=["GET", "POST", "DELETE"], allow_headers=["*"])
 app.include_router(router)

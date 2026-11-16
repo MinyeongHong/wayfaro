@@ -1,8 +1,8 @@
-"""Private CV comparison API. No public JobListing mutation."""
+"""Private CV comparison API. Temporary documents with anonymous ownership."""
 from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from sqlalchemy.orm import Session
-from app.api.routes import get_db
+from app.api.dependencies import get_db
 from app.config import settings
 from app.models.core import BackgroundJob
 from app.services.matching.schemas import AnalysisAccepted, AnalysisCreate, AnalysisView, POLICY_VERSION

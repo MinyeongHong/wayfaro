@@ -22,7 +22,6 @@ services:
   api:
     build: ./backend
     environment:
-      INGESTION_ADMIN_TOKEN: ${INGESTION_ADMIN_TOKEN:-}
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
       GEMINI_MODEL: ${GEMINI_MODEL:-}
       CV_MATCH_COOKIE_SECURE: ${CV_MATCH_COOKIE_SECURE:-true}
