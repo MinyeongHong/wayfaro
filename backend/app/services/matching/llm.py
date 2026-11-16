@@ -11,20 +11,33 @@ from app.services.ingestion.greenhouse import _retry_after
 
 
 def _gemini_schema(schema):
-    """Remove generation constraints unsupported by the model's complexity budget."""
+    """Omit array maxItems for generation only; preserve the local validation schema."""
     result = copy.deepcopy(schema.model_json_schema())
 
     def remove_max_items(value):
-        if isinstance(value, dict):
-            value.pop("maxItems", None)
-            for child in value.values():
+        if not isinstance(value, dict):
+            return
+        value.pop("maxItems", None)
+        # These maps contain named subschemas: their keys are data names, not keywords.
+        for key in ("properties", "patternProperties", "$defs", "definitions", "dependentSchemas", "dependencies"):
+            children = value.get(key)
+            if isinstance(children, dict):
+                for child in children.values():
+                    remove_max_items(child)
+        for key in ("items", "additionalItems", "additionalProperties", "unevaluatedItems", "unevaluatedProperties",
+                    "contains", "propertyNames", "not", "if", "then", "else", "contentSchema",
+                    "allOf", "anyOf", "oneOf", "prefixItems"):
+            child = value.get(key)
+            if isinstance(child, list):
+                for item in child:
+                    remove_max_items(item)
+            else:
                 remove_max_items(child)
-        elif isinstance(value, list):
-            for child in value:
-                remove_max_items(child)
+        # Defaults, examples, enum/const values and other annotations are data, not schemas.
 
     remove_max_items(result)
     return result
+
 
 def http_error_type(status):
     """Classify the numeric status only; never inspect provider response bodies."""

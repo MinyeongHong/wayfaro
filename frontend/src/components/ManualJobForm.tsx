@@ -11,17 +11,17 @@ export function ManualJobForm({ onCreated }: { onCreated: (id: string) => void }
     setLoading(true); setResult('');
     try {
       const body = await request<JobCreated>('/jobs', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ raw_text: text }) });
-      setResult(`공고가 등록되었습니다. 작업 ID: ${body.task_id}. AI 추출은 아직 구현되지 않았습니다.`);
+      setResult(`Job added. Task ID: ${body.task_id}. AI extraction for manually added listings is not implemented yet.`);
       setText(''); onCreated(body.job_id);
-    } catch (error) { setResult(error instanceof Error ? error.message : '등록에 실패했습니다.'); }
+    } catch (error) { setResult(error instanceof Error ? error.message : 'The job could not be added.'); }
     finally { setLoading(false); }
   }
-  return <details className="panel manual"><summary>채용공고 직접 등록</summary>
-    <p>공고 원문을 저장합니다. AI 추출 작업은 NOT_IMPLEMENTED로 처리됩니다.</p>
+  return <details className="panel manual"><summary>Add a job manually</summary>
+    <p>This saves the original posting to public job discovery. The separate extraction task returns NOT_IMPLEMENTED. Do not paste your CV or other private information here.</p>
     <form onSubmit={submit}>
-      <label htmlFor="manual-text">채용공고 원문</label>
-      <textarea id="manual-text" value={text} onChange={event => setText(event.target.value)} minLength={30} required placeholder="30자 이상의 채용공고를 붙여 넣으세요." />
-      <button disabled={loading || text.length < 30}>{loading ? '등록 중…' : '공고 등록'}</button>
+      <label htmlFor="manual-text">Original job posting</label>
+      <textarea id="manual-text" value={text} onChange={event => setText(event.target.value)} minLength={30} required placeholder="Paste a job description of at least 30 characters." />
+      <button disabled={loading || text.length < 30}>{loading ? 'Adding…' : 'Add job'}</button>
     </form>
     {result && <p role="status">{result}</p>}
   </details>;

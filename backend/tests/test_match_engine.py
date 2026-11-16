@@ -1,4 +1,5 @@
 """Deterministic mock LLM / mocked HTTP tests; never call external APIs."""
+import copy
 import json
 import logging
 
@@ -20,6 +21,22 @@ def span(text, quote):
     start = text.index(quote)
     return {"start": start, "end": start + len(quote), "quote": quote}
 
+
+
+def assert_generation_schema(local, transmitted):
+    """Independent contract: maxItems alone may differ, at any schema depth."""
+    if isinstance(local, dict):
+        assert isinstance(transmitted, dict)
+        assert set(transmitted) == set(local) - {"maxItems"}
+        for key, value in local.items():
+            if key != "maxItems":
+                assert_generation_schema(value, transmitted[key])
+    elif isinstance(local, list):
+        assert isinstance(transmitted, list) and len(transmitted) == len(local)
+        for expected, actual in zip(local, transmitted):
+            assert_generation_schema(expected, actual)
+    else:
+        assert transmitted == local
 
 def extraction_data():
     return {"requirements": [
@@ -68,13 +85,11 @@ def test_forbidden_classifications(status):
         run_match(CV, JD, MockLLM(comparison=data))
 
 
-@pytest.mark.parametrize("change", ["quote", "offset", "coverage", "duplicate", "no_evidence"])
+@pytest.mark.parametrize("change", ["quote", "coverage", "duplicate", "no_evidence"])
 def test_business_rules_reject_invalid_evidence(change):
     data = comparison_data()
     if change == "quote":
         data["assessments"][0]["cv_evidence"][0]["quote"] = "Invented experience"
-    elif change == "offset":
-        data["assessments"][0]["cv_evidence"][0]["end"] += 1
     elif change == "coverage":
         data["assessments"].pop()
     elif change == "duplicate":
@@ -85,14 +100,26 @@ def test_business_rules_reject_invalid_evidence(change):
         run_match(CV, JD, MockLLM(comparison=data))
 
 
+
+def test_business_rules_recover_unique_exact_quote_offset():
+    data = comparison_data()
+    expected = copy.deepcopy(data["assessments"][0]["cv_evidence"][0])
+    data["assessments"][0]["cv_evidence"][0]["end"] += 1
+    result = run_match(CV, JD, MockLLM(comparison=data))
+    recovered = result.assessments[0].cv_evidence[0]
+    assert recovered.model_dump() == expected
+    assert CV[recovered.start:recovered.end] == recovered.quote
+
 def test_unicode_offsets_are_codepoints_not_utf16():
     data = comparison_data()
     data["assessments"][0]["cv_evidence"] = [span(CV, "🚀 projects")]
     # Structural verification is distinct from semantic accuracy.
     assert run_match(CV, JD, MockLLM(comparison=data)).matched_count == 1
     data["assessments"][0]["cv_evidence"][0]["start"] += 1
-    with pytest.raises(MatchError, match="EVIDENCE_MISMATCH"):
-        run_match(CV, JD, MockLLM(comparison=data))
+    recovered = run_match(CV, JD, MockLLM(comparison=data)).assessments[0].cv_evidence[0]
+    assert recovered.start == CV.index("🚀 projects")
+    assert recovered.end == recovered.start + len("🚀 projects")
+    assert CV[recovered.start:recovered.end] == recovered.quote == "🚀 projects"
 
 
 def test_invalid_extraction_and_duplicate_requirements():
@@ -144,7 +171,7 @@ def test_real_adapter_request_contract_with_mock_transport(configured):
         assert not request.url.query
         assert "store" not in body and "tools" not in body
         assert body["generationConfig"]["responseMimeType"] == "application/json"
-        assert body["generationConfig"]["responseJsonSchema"] == Extraction.model_json_schema()
+        assert_generation_schema(Extraction.model_json_schema(), body["generationConfig"]["responseJsonSchema"])
         assert "candidateCount" not in body["generationConfig"]
         assert body["systemInstruction"]["parts"] == [{"text": "instruction"}]
         assert json.loads(body["contents"][0]["parts"][0]["text"]) == {"jd_text": JD}
@@ -321,7 +348,7 @@ def test_two_stage_pipeline_through_gemini_mock_http(configured):
             payload = extraction_data()
         else:
             assert document["cv_text"] == CV and len(document["requirements"]) == 2
-            assert body["generationConfig"]["responseJsonSchema"] == Comparison.model_json_schema()
+            assert_generation_schema(Comparison.model_json_schema(), body["generationConfig"]["responseJsonSchema"])
             payload = comparison_data()
         return httpx.Response(200, json=mock_response(payload))
     with httpx.Client(transport=httpx.MockTransport(handler)) as client:
@@ -408,16 +435,19 @@ def test_evidence_validation_failure_retains_stage(stage):
     assert caught.value.diagnostics()["stage"] == stage
 
 
-def test_gemini_31_request_omits_candidate_count_and_keeps_schema_bounds(configured, monkeypatch):
+def test_gemini_31_request_omits_candidate_count_and_keeps_local_schema_bounds(configured, monkeypatch):
     monkeypatch.setattr(settings, "gemini_model", "gemini-3.1-flash-lite")
     expected = Extraction.model_json_schema()
+    original = copy.deepcopy(expected)
     def handler(request):
         body = json.loads(request.content)
         assert request.url.path.endswith('/models/gemini-3.1-flash-lite:generateContent')
         config = body["generationConfig"]
         assert "candidateCount" not in config
-        assert config["responseJsonSchema"] == expected
-        assert config["responseJsonSchema"]["properties"]["requirements"]["maxItems"] == 60
+        assert_generation_schema(expected, config["responseJsonSchema"])
+        assert "maxItems" not in config["responseJsonSchema"]["properties"]["requirements"]
+        assert Extraction.model_json_schema() == original
+        assert original["properties"]["requirements"]["maxItems"] == 60
         return httpx.Response(200, json=mock_response(extraction_data()))
     with httpx.Client(transport=httpx.MockTransport(handler)) as client:
         assert GeminiMatchLLM(client).generate(Extraction, "instruction", {"jd_text": JD}).requirements

@@ -1,9 +1,10 @@
-const API = (import.meta.env.VITE_API_URL || 'http://localhost:8000').replace(/\/$/, '');
+import { API } from './config';
 
 export async function request<T>(path: string, options?: RequestInit): Promise<T> {
-  const response = await fetch(`${API}/api/v1${path}`, options);
+  let response: Response;
+  try { response = await fetch(`${API}/api/v1${path}`, options); } catch { throw new Error('The connection could not be completed. Please try again.'); }
   if (!response.ok) {
-    throw new Error(response.status === 404 ? '공고를 찾을 수 없습니다.' : `요청을 처리하지 못했습니다. (HTTP ${response.status})`);
+    throw new Error(response.status === 404 ? 'The job could not be found.' : `The request could not be completed. (HTTP ${response.status})`);
   }
   return response.json() as Promise<T>;
 }
