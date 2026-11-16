@@ -1,0 +1,52 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: jobmatcher
+      POSTGRES_PASSWORD: jobmatcher
+      POSTGRES_DB: jobmatcher
+    ports: ["5432:5432"]
+    volumes: ["pgdata:/var/lib/postgresql/data"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U jobmatcher -d jobmatcher"]
+      interval: 3s
+      timeout: 3s
+      retries: 15
+  migrate:
+    build: ./backend
+    environment:
+      DATABASE_URL: postgresql+psycopg://jobmatcher:jobmatcher@db:5432/jobmatcher
+    command: ["alembic", "upgrade", "head"]
+    depends_on:
+      db: {condition: service_healthy}
+  api:
+    build: ./backend
+    environment:
+      INGESTION_ADMIN_TOKEN: ${INGESTION_ADMIN_TOKEN:-}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      GEMINI_MODEL: ${GEMINI_MODEL:-}
+      CV_MATCH_COOKIE_SECURE: ${CV_MATCH_COOKIE_SECURE:-true}
+      CV_MATCH_RETENTION_HOURS: ${CV_MATCH_RETENTION_HOURS:-24}
+      CV_MATCH_SESSION_LIMIT: ${CV_MATCH_SESSION_LIMIT:-10}
+      CV_MATCH_GLOBAL_PENDING_LIMIT: ${CV_MATCH_GLOBAL_PENDING_LIMIT:-100}
+      CV_MATCH_GLOBAL_DAILY_LIMIT: ${CV_MATCH_GLOBAL_DAILY_LIMIT:-200}
+      CV_MATCH_ALLOWED_ORIGINS: '${CV_MATCH_ALLOWED_ORIGINS:-["http://localhost:5173","http://localhost:8000"]}'
+      DATABASE_URL: postgresql+psycopg://jobmatcher:jobmatcher@db:5432/jobmatcher
+    ports: ["8000:8000"]
+    depends_on:
+      migrate: {condition: service_completed_successfully}
+  worker:
+    build: ./backend
+    command: ["python", "-m", "app.workers.runner"]
+    environment:
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      GEMINI_MODEL: ${GEMINI_MODEL:-}
+      DATABASE_URL: postgresql+psycopg://jobmatcher:jobmatcher@db:5432/jobmatcher
+    depends_on:
+      migrate: {condition: service_completed_successfully}
+  frontend:
+    build: ./frontend
+    ports: ["5173:5173"]
+    depends_on: [api]
+volumes:
+  pgdata:
