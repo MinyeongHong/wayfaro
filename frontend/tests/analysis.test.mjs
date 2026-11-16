@@ -9,7 +9,7 @@ const { analysisApi, csrfCookie, AnalysisApiError } = require('./analysisApi.js'
 const { inputProblem, matchingEvidence, resultEvidenceMatches, englishText } = require('./analysisText.js');
 const React = require('react');
 const { renderToStaticMarkup: render } = require('react-dom/server');
-const { AnalysisPage } = require('./AnalysisPage.js');
+const { AnalysisPage } = require('./pages/AnalysisPage.js');
 const { AnalysisResults } = require('./components/analysis/AnalysisResults.js');
 const CV = '🚀 Built Python services for a small team.\r\nCafé reporting project.';
 const JD = 'Required: Python services. Preferred: SQL. Work authorization required.';
@@ -167,7 +167,13 @@ test('untrusted evidence is escaped as text', () => {
   assert(markup.includes('&lt;script&gt;')); assert(!markup.includes('<script>'));
 });
 test('analysis source does not use browser storage, console, analytics, or URL state', () => {
-  for (const name of ['analysisController.js', 'analysisApi.js', 'AnalysisPage.js', 'components/analysis/AnalysisResults.js']) {
+  for (const name of [
+    'App.js', 'analysisController.js', 'analysisApi.js', 'pages/AnalysisPage.js',
+    'components/analysis/AnalysisForm.js', 'components/analysis/ConsentPanel.js',
+    'components/analysis/DocumentInput.js', 'components/analysis/AnalysisStatus.js',
+    'components/analysis/AnalysisResults.js', 'components/analysis/RequirementCard.js',
+    'components/analysis/EvidenceList.js', 'components/analysis/DeleteAnalysisDialog.js',
+  ]) {
     const source = fs.readFileSync(path.join(process.env.WAYFARO_TEST_BUILD, name), 'utf8');
     assert(!/localStorage|sessionStorage|console\.|pushState|replaceState|gtag\(|analytics\./.test(source));
   }
@@ -189,9 +195,9 @@ test('input, consent and loading screen state are reflected in accessible render
   const h = harness(); await h.ready(); h.controller.setConsent(false);
   let markup = render(React.createElement(AnalysisPage, { controller: h.controller }));
   assert(markup.includes('Your CV')); assert(markup.includes('Job description')); assert(markup.includes('Temporary retention: up to 24 hours'));
-  assert(markup.includes('I agree to send these documents')); assert(/class="primary"[^>]*disabled/.test(markup));
+  assert(markup.includes('I agree to send these documents')); assert(/<button(?=[^>]*type="submit")(?=[^>]* disabled="")[^>]*>/.test(markup));
   h.controller.setConsent(true); markup = render(React.createElement(AnalysisPage, { controller: h.controller }));
-  assert(!/class="primary"[^>]*disabled/.test(markup));
+  assert(!/<button(?=[^>]*type="submit")(?=[^>]* disabled="")[^>]*>/.test(markup));
   await h.controller.submit(); await settle(); markup = render(React.createElement(AnalysisPage, { controller: h.controller }));
   assert(markup.includes('Your analysis is queued')); assert(markup.includes('role="status"')); assert(!markup.includes(aid)); h.controller.pause();
 });
@@ -238,4 +244,91 @@ test('the application renders private comparison without public job navigation',
   assert(markup.includes('meets the opportunity'));
   assert(!markup.includes('Job discovery'));
   assert(!markup.includes('Add a job manually'));
+});
+
+test('shared Button preserves native button types, disabled state and accessible props', () => {
+  const { Button } = require('./components/ui/Button.js');
+  const markup = render(React.createElement(Button, {
+    variant: 'secondary', disabled: true, 'aria-describedby': 'explanation',
+  }, 'Retry'));
+  assert(markup.includes('type="button"'));
+  assert(markup.includes('disabled=""'));
+  assert(markup.includes('aria-describedby="explanation"'));
+  const submit = render(React.createElement(Button, { type: 'submit', size: 'large' }, 'Compare'));
+  assert(submit.includes('type="submit"'));
+  assert(!submit.includes('disabled=""'));
+});
+
+test('DocumentInput keeps Unicode counts, original text and linked help without truncating inputs', () => {
+  const { DocumentInput } = require('./components/analysis/DocumentInput.js');
+  const value = '🚀 cafe\u0301\r\nPython';
+  const markup = render(React.createElement(DocumentInput, {
+    name: 'cv', label: 'Your CV', number: '01', help: 'Private text',
+    placeholder: 'Paste', value, limit: 40, disabled: false, onChange() {},
+  }));
+  assert(markup.includes(`>${value}</textarea>`));
+  assert(markup.includes(`${Array.from(value).length} characters`));
+  assert(markup.includes('limit 40'));
+  assert(markup.includes('for="cv-text"'));
+  assert(markup.includes('aria-describedby="cv-help cv-count"'));
+  assert(!/maxlength/i.test(markup));
+});
+
+test('ConsentPanel retains loading and error states and suppresses unsafe provider links', () => {
+  const { ConsentPanel } = require('./components/analysis/ConsentPanel.js');
+  const props = {
+    policy, loading: false, error: '', consent: false, disabled: false,
+    onConsentChange() {}, onRetry() {},
+  };
+  let markup = render(React.createElement(ConsentPanel, { ...props, loading: true }));
+  assert(markup.includes('role="status"'));
+  assert(!markup.includes('type="checkbox"'));
+  markup = render(React.createElement(ConsentPanel, { ...props, error: 'Policy unavailable' }));
+  assert(markup.includes('role="alert"'));
+  assert(markup.includes('Retry policy'));
+  for (const url of ['javascript:alert(1)', 'https://user:secret@example.com', 'https://bad.example/unsafe path']) {
+    markup = render(React.createElement(ConsentPanel, { ...props, policy: { ...policy, provider_policy_url: url } }));
+    assert(!markup.includes('href='));
+  }
+  markup = render(React.createElement(ConsentPanel, props));
+  assert(markup.includes('rel="noopener noreferrer"'));
+  assert(!markup.includes('checked=""'));
+});
+
+test('EvidenceList rejects mismatched Unicode offsets and never displays an unverified quote', () => {
+  const { EvidenceList } = require('./components/analysis/EvidenceList.js');
+  const markup = render(React.createElement(EvidenceList, {
+    title: 'From your CV', source: CV,
+    spans: [{ start: 0, end: 6, quote: 'Invented experience' }],
+  }));
+  assert(markup.includes('could not be verified'));
+  assert(!markup.includes('Invented experience'));
+});
+
+test('AnalysisStatus displays retry state and only allowlisted diagnostic values', () => {
+  const { AnalysisStatus } = require('./components/analysis/AnalysisStatus.js');
+  const props = { confirmDelete: false, onRetryPoll() {}, onForget() {}, onConfirmDelete() {} };
+  const state = { phase: 'waiting', message: '', view: { ...view('pending'), error: { code: 'LLM_HTTP_ERROR' } } };
+  let markup = render(React.createElement(AnalysisStatus, { ...props, state }));
+  assert(markup.includes('Waiting for a server retry.'));
+  assert(markup.includes('do not need to submit again'));
+  state.view = { ...view('failed'), error: { code: 'LLM_HTTP_ERROR', stage: 'comparison', http_status: '503', provider_body: CV, error_type: '<script>private</script>' } };
+  markup = render(React.createElement(AnalysisStatus, { ...props, state }));
+  assert(markup.includes('stage: comparison'));
+  assert(markup.includes('http_status: 503'));
+  assert(!markup.includes(CV));
+  assert(!markup.includes('script'));
+});
+
+test('DeleteAnalysisDialog preserves accessible labels and disables both actions while deleting', () => {
+  const { DeleteAnalysisDialog } = require('./components/analysis/DeleteAnalysisDialog.js');
+  const markup = render(React.createElement(DeleteAnalysisDialog, {
+    busy: true, error: '', onCancel() {}, onDelete() {},
+  }));
+  assert(markup.includes('aria-labelledby="delete-title"'));
+  assert(markup.includes('aria-describedby="delete-description"'));
+  const buttons = markup.match(/<button\b[^>]*>/g);
+  assert.equal(buttons.length, 2);
+  assert(buttons.every(button => button.includes('disabled=""') && button.includes('type="button"')));
+  assert(markup.includes('Deleting…'));
 });
